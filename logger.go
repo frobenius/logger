@@ -48,6 +48,8 @@ type Logger struct {
 	head             *queueNode
 	tail             *queueNode
 	autoFlush        bool
+	colorsOnStdout   bool
+	colorsOnFile     bool
 }
 
 // StringToLogLevel convert string to LogLevel
@@ -97,6 +99,7 @@ func NewLogger(filename string, maxFileSize int, maxNumFiles int, level LogLevel
 	logger.enableDay = true
 	logger.enableLevel = true
 	logger.autoFlush = false
+	logger.colorsOnStdout = true
 	return logger
 }
 
@@ -143,6 +146,8 @@ func (l *Logger) logMessage(goRoutine bool) {
 	} else if node.logLevel == Trace {
 		level = "[TRACE] "
 	}
+	color, _ := colors[node.logLevel]
+	levelColor := fmt.Sprintf("\x1b[%dm%s\x1b[0m", color, level)
 	format = node.format
 	a = node.args
 	var msg string
@@ -168,11 +173,17 @@ func (l *Logger) logMessage(goRoutine bool) {
 	}
 
 	// Build the log row to write on file
-	msg += " " + level + fmt.Sprintf(format, a...) + "\n"
+	extraMsg := fmt.Sprintf(format, a...) + "\n"
+	msgColor := msg + " " + levelColor + extraMsg
+	msg += " " + level + extraMsg
 
 	// If stdout enable print message also on standard output
 	if l.enableStdout {
-		fmt.Print(msg)
+		if l.colorsOnStdout {
+			fmt.Print(msgColor)
+		} else {
+			fmt.Print(msg)
+		}
 	}
 
 	if l.logfile == "" {
@@ -187,8 +198,12 @@ func (l *Logger) logMessage(goRoutine bool) {
 	// Perform eventually rotation of log files
 	fileinfo, err := os.Stat(l.logfile)
 	if err == nil {
-		var maxSize = int64(l.maxFileSize)
-		if l.maxFileSize > 0 && fileinfo.Size()+int64(len(msg)) > maxSize {
+		maxSize := int64(l.maxFileSize)
+		msgLen := len(msg)
+		if l.colorsOnFile {
+			msgLen = len(msgColor)
+		}
+		if l.maxFileSize > 0 && fileinfo.Size()+int64(msgLen) > maxSize {
 			// Remove older log file
 			if _, err := os.Stat(l.logfile + "." + strconv.Itoa(l.maxNumFiles-1)); err == nil && l.maxNumFiles > 1 {
 				os.Remove(l.logfile + "." + strconv.Itoa(l.maxNumFiles-1))
@@ -223,7 +238,11 @@ func (l *Logger) logMessage(goRoutine bool) {
 	defer f.Close()
 
 	// Write on file
-	_, err = f.Write([]byte(msg))
+	if l.colorsOnFile {
+		_, err = f.Write([]byte(msgColor))
+	} else {
+		_, err = f.Write([]byte(msg))
+	}
 	if err != nil {
 		if goRoutine {
 			l.mutexCounter.Lock()
@@ -267,6 +286,16 @@ func (l *Logger) EnableDay(flag bool) {
 // EnableLevel function set or unset log level in log messages
 func (l *Logger) EnableLevel(flag bool) {
 	l.enableLevel = flag
+}
+
+// ColorsOnFile function enable or disable colors in log written on log file
+func (l *Logger) ColorsOnFile(flag bool) {
+	l.colorsOnFile = flag
+}
+
+// ColorsOnStdout function enable or disable colors in log written on stdout
+func (l *Logger) ColorsOnStdout(flag bool) {
+	l.colorsOnStdout = flag
 }
 
 // Flush function process all messages in queue

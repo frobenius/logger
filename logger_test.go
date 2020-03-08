@@ -6,9 +6,14 @@ import (
 
 func TestLogger(t *testing.T) {
 	var log = NewLogger("test_logger.log", 5000, 5, Trace, 0666)
-	Infof("%06d - This is a global log message", 12345678)
+	SetLevel(Trace)
+	Infof("%06d - This is a global log message", 1)
+	Debugf("%06d - This is a global log message", 2)
+	Warningf("%06d - This is a global log message", 3)
+	Tracef("%06d - This is a global log message", 4)
+	Errorf("%06d - This is a global log message", 5)
+	Fatalf("%06d - This is a global log message", 6)
 	for i := 1; i <= 30; i++ {
-		//log.EnableStdOut(true)
 		log.Infof("%06d - InfoInfoInfoInfoInfoInfoInfoInfoInfoInfoInfoInfoInfoInfoInfoInfoInfoInfoInfoInfoInfoInfoInfoInfoInfo", i)
 		log.Debugf("%06d - DebugDebugDebugDebugDebugDebugDebugDebugDebugDebugDebugDebugDebugDebugDebugDebugDebugDebugDebugDebug", i)
 		log.Tracef("%06d - TraceTraceTraceTraceTraceTraceTraceTraceTraceTraceTraceTraceTraceTraceTraceTraceTraceTraceTraceTrace", i)

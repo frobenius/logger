@@ -3,7 +3,16 @@ package logger
 // gLog is the static logger
 var gLog *Logger
 
+var colors map[LogLevel]int
+
 func init() {
+	colors = make(map[LogLevel]int)
+	colors[Info] = 32
+	colors[Debug] = 34
+	colors[Warning] = 33
+	colors[Error] = 31
+	colors[Trace] = 36
+	colors[Fatal] = 35
 	gLog = NewLogger("", 0, 0, Info, 0666)
 	gLog.EnableStdOut(true)
 	gLog.EnableAutoFlush(true)
