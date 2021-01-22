@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"compress/gzip"
 	"fmt"
 	"os"
 	"strconv"
@@ -32,24 +33,23 @@ type queueNode struct {
 
 // Logger object
 type Logger struct {
-	logfile          string
-	maxFileSize      int
-	maxNumFiles      int
-	counterGoRoutine int
-	perm             os.FileMode
-	mutex            sync.Mutex
-	mutexMsg         sync.Mutex
-	mutexCounter     sync.Mutex
-	enableStdout     bool
-	enableMsec       bool
-	enableDay        bool
-	enableLevel      bool
-	level            LogLevel
-	head             *queueNode
-	tail             *queueNode
-	autoFlush        bool
-	colorsOnStdout   bool
-	colorsOnFile     bool
+	logfile        string
+	maxFileSize    int
+	maxNumFiles    int
+	perm           os.FileMode
+	mutex          sync.Mutex
+	mutexMsg       sync.Mutex
+	enableStdout   bool
+	enableMsec     bool
+	enableDay      bool
+	enableLevel    bool
+	level          LogLevel
+	head           *queueNode
+	tail           *queueNode
+	autoFlush      bool
+	colorsOnStdout bool
+	colorsOnFile   bool
+	compression    bool
 }
 
 // StringToLogLevel convert string to LogLevel
@@ -81,30 +81,55 @@ func (l *Logger) addMessage(ts time.Time, logLevel LogLevel, format string, a ..
 	l.mutex.Unlock()
 }
 
+func compressLogFile(src string, dst string) {
+	f, err := os.Open(src)
+	if err != nil {
+		return
+	}
+	data := make([]byte, 64*1024)
+	defer f.Close()
+	compressedFile, err := os.Create(dst)
+	w := gzip.NewWriter(compressedFile)
+	defer w.Close()
+	if err != nil {
+		return
+	}
+	n, err := f.Read(data)
+	for n > 0 && err == nil {
+		w.Write(data[:n])
+		n, err = f.Read(data)
+	}
+}
+
 // NewLogger function istance an object Logger
 func NewLogger(filename string, maxFileSize int, maxNumFiles int, level LogLevel, perm os.FileMode) *Logger {
 	logger := new(Logger)
 	logger.logfile = filename
 	logger.maxFileSize = maxFileSize
+	if logger.maxFileSize < 0 {
+		logger.maxFileSize = 0
+	}
 	logger.maxNumFiles = maxNumFiles
+	if logger.maxNumFiles < 1 {
+		logger.maxNumFiles = 1
+	}
 	logger.perm = perm
 	logger.mutex = sync.Mutex{}
 	logger.mutexMsg = sync.Mutex{}
-	logger.mutexCounter = sync.Mutex{}
 	logger.enableStdout = false
 	logger.level = level
 	logger.head = nil
-	logger.counterGoRoutine = 0
 	logger.enableMsec = true
 	logger.enableDay = true
 	logger.enableLevel = true
 	logger.autoFlush = false
 	logger.colorsOnStdout = true
+	logger.compression = false
 	return logger
 }
 
 // logMessage function is the core of logger functionalities
-func (l *Logger) logMessage(goRoutine bool) {
+func (l *Logger) logMessage() bool {
 	var node *queueNode
 	var ts time.Time
 	var level string
@@ -116,12 +141,7 @@ func (l *Logger) logMessage(goRoutine bool) {
 	l.mutex.Lock()
 	if l.head == nil {
 		l.mutex.Unlock()
-		if goRoutine {
-			l.mutexCounter.Lock()
-			l.counterGoRoutine--
-			l.mutexCounter.Unlock()
-		}
-		return
+		return false
 	}
 	node = l.head
 	l.head = node.next
@@ -187,12 +207,7 @@ func (l *Logger) logMessage(goRoutine bool) {
 	}
 
 	if l.logfile == "" {
-		if goRoutine {
-			l.mutexCounter.Lock()
-			l.counterGoRoutine--
-			l.mutexCounter.Unlock()
-		}
-		return
+		return true
 	}
 
 	// Perform eventually rotation of log files
@@ -205,18 +220,26 @@ func (l *Logger) logMessage(goRoutine bool) {
 		}
 		if l.maxFileSize > 0 && fileinfo.Size()+int64(msgLen) > maxSize {
 			// Remove older log file
-			if _, err := os.Stat(l.logfile + "." + strconv.Itoa(l.maxNumFiles-1)); err == nil && l.maxNumFiles > 1 {
+			if l.maxNumFiles > 1 {
 				os.Remove(l.logfile + "." + strconv.Itoa(l.maxNumFiles-1))
+				os.Remove(l.logfile + "." + strconv.Itoa(l.maxNumFiles-1) + ".gz")
 			}
 
 			// Rotate files
 			for i := l.maxNumFiles - 2; i >= 1; i-- {
-				if _, err := os.Stat(l.logfile + "." + strconv.Itoa(i)); err == nil {
+				if l.compression {
+					os.Rename(l.logfile+"."+strconv.Itoa(i)+".gz", l.logfile+"."+strconv.Itoa(i+1)+".gz")
+				} else {
 					os.Rename(l.logfile+"."+strconv.Itoa(i), l.logfile+"."+strconv.Itoa(i+1))
 				}
 			}
 			if l.maxNumFiles > 1 {
-				os.Rename(l.logfile, l.logfile+".1")
+				if l.compression {
+					compressLogFile(l.logfile, l.logfile+".1.gz")
+					os.Remove(l.logfile)
+				} else {
+					os.Rename(l.logfile, l.logfile+".1")
+				}
 			} else {
 				os.Remove(l.logfile)
 			}
@@ -226,12 +249,7 @@ func (l *Logger) logMessage(goRoutine bool) {
 	// Open log file in append
 	f, err := os.OpenFile(l.logfile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, l.perm)
 	if err != nil {
-		if goRoutine {
-			l.mutexCounter.Lock()
-			l.counterGoRoutine--
-			l.mutexCounter.Unlock()
-		}
-		return
+		return true
 	}
 
 	// Close file when function return
@@ -239,23 +257,39 @@ func (l *Logger) logMessage(goRoutine bool) {
 
 	// Write on file
 	if l.colorsOnFile {
-		_, err = f.Write([]byte(msgColor))
+		f.Write([]byte(msgColor))
 	} else {
-		_, err = f.Write([]byte(msg))
+		f.Write([]byte(msg))
 	}
-	if err != nil {
-		if goRoutine {
-			l.mutexCounter.Lock()
-			l.counterGoRoutine--
-			l.mutexCounter.Unlock()
-		}
-		return
+	return true
+}
+
+// SetFileName set the log file name
+func (l *Logger) SetFileName(fileName string) {
+	l.logfile = fileName
+}
+
+// SetMaxFileSize set the maximum size of a single log file in bytes. 0 means no limit
+func (l *Logger) SetMaxFileSize(maxSize int) {
+	if maxSize < 0 {
+		l.maxFileSize = 0
+	} else {
+		l.maxFileSize = maxSize
 	}
-	if goRoutine {
-		l.mutexCounter.Lock()
-		l.counterGoRoutine--
-		l.mutexCounter.Unlock()
+}
+
+// SetMaxNumFiles set the maximum number of log files
+func (l *Logger) SetMaxNumFiles(maxNum int) {
+	if maxNum < 1 {
+		l.maxNumFiles = 1
+	} else {
+		l.maxNumFiles = maxNum
 	}
+}
+
+// SetPermissionsFile set the permission on log file
+func (l *Logger) SetPermissionsFile(perm os.FileMode) {
+	l.perm = perm
 }
 
 // SetLevel function set a new log level
@@ -288,44 +322,32 @@ func (l *Logger) EnableLevel(flag bool) {
 	l.enableLevel = flag
 }
 
-// ColorsOnFile function enable or disable colors in log written on log file
-func (l *Logger) ColorsOnFile(flag bool) {
+// EnableCompression enable compression of rolled file
+func (l *Logger) EnableCompression(flag bool) {
+	l.compression = flag
+}
+
+// EnableColorsOnFile function enable or disable colors in log written on log file
+func (l *Logger) EnableColorsOnFile(flag bool) {
 	l.colorsOnFile = flag
 }
 
-// ColorsOnStdout function enable or disable colors in log written on stdout
-func (l *Logger) ColorsOnStdout(flag bool) {
+// EnableColorsOnStdout function enable or disable colors in log written on stdout
+func (l *Logger) EnableColorsOnStdout(flag bool) {
 	l.colorsOnStdout = flag
 }
 
 // Flush function process all messages in queue
 func (l *Logger) Flush() {
-	var counter = 0
-	var n = 10
-	l.logMessage(false)
-	l.mutexCounter.Lock()
-	counter = l.counterGoRoutine
-	l.mutexCounter.Unlock()
-	for counter != 0 {
-		time.Sleep(10 * time.Millisecond)
-		n--
-		l.mutexCounter.Lock()
-		counter = l.counterGoRoutine
-		l.mutexCounter.Unlock()
-		if n == 0 {
-			break
-		}
+	for l.logMessage() {
 	}
 }
 
 func (l *Logger) processMessage() {
-	l.mutexCounter.Lock()
-	l.counterGoRoutine++
-	l.mutexCounter.Unlock()
 	if l.autoFlush {
-		l.logMessage(false)
+		l.logMessage()
 	} else {
-		go l.logMessage(true)
+		go l.logMessage()
 	}
 }
 

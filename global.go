@@ -1,5 +1,7 @@
 package logger
 
+import "os"
+
 // gLog is the static logger
 var gLog *Logger
 
@@ -23,9 +25,34 @@ func SetLevel(level LogLevel) {
 	gLog.level = level
 }
 
+// SetFileName set the log file name
+func SetFileName(fileName string) {
+	gLog.SetFileName(fileName)
+}
+
+// SetMaxFileSize set the maximum size of a single log file in bytes. 0 means no limit
+func SetMaxFileSize(maxSize int) {
+	gLog.SetMaxFileSize(maxSize)
+}
+
+// SetMaxNumFiles set the maximum number of log files
+func SetMaxNumFiles(maxNum int) {
+	gLog.SetMaxNumFiles(maxNum)
+}
+
+// SetPermissionsFile set the permission on log file
+func SetPermissionsFile(perm os.FileMode) {
+	gLog.SetPermissionsFile(perm)
+}
+
 // GetDefaultLogger get the global logger to use in other packages
 func GetDefaultLogger() *Logger {
 	return gLog
+}
+
+// SetDefaultLogger set the defalut logger
+func SetDefaultLogger(logger *Logger) {
+	gLog = logger
 }
 
 // EnableAutoFlush function set autoflush flag
@@ -51,6 +78,21 @@ func EnableDay(flag bool) {
 // EnableLevel function set or unset log level in log messages
 func EnableLevel(flag bool) {
 	gLog.EnableLevel(flag)
+}
+
+// EnableColorsOnFile function enable or disable colors in log written on log file
+func EnableColorsOnFile(flag bool) {
+	gLog.EnableColorsOnFile(flag)
+}
+
+// EnableColorsOnStdout function enable or disable colors in log written on stdout
+func EnableColorsOnStdout(flag bool) {
+	gLog.EnableColorsOnStdout(flag)
+}
+
+// EnableCompression enable compression of rolled file
+func EnableCompression(flag bool) {
+	gLog.EnableCompression(flag)
 }
 
 // Infof function emit a log at Info level with an interface as fmt.Printf

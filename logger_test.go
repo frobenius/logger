@@ -6,6 +6,7 @@ import (
 
 func TestLogger(t *testing.T) {
 	var log = NewLogger("test_logger.log", 5000, 5, Trace, 0666)
+	log.EnableCompression(true)
 	SetLevel(Trace)
 	Infof("%06d - This is a global log message", 1)
 	Debugf("%06d - This is a global log message", 2)
